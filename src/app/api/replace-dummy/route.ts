@@ -32,6 +32,14 @@ export async function POST(req: Request) {
         orderEditBegin(id: $id) {
           calculatedOrder {
             id
+            lineItems(first: 50) {
+              edges {
+                node {
+                  id
+                  originalLineItem { id }
+                }
+              }
+            }
           }
           userErrors {
             field
@@ -41,10 +49,26 @@ export async function POST(req: Request) {
       }`;
     const beginData = await callShopify(beginEditMutation, { id: orderId });
     const calculatedOrderId = beginData?.orderEditBegin?.calculatedOrder?.id;
-    console.log("🆕 Calculated order ID:", calculatedOrderId);
+    const calculatedLineItems =
+      beginData?.orderEditBegin?.calculatedOrder?.lineItems?.edges || [];
 
     if (!calculatedOrderId) {
       console.error("❌ Could not begin order edit:", beginData);
+      continue;
+    }
+    console.log("🆕 Calculated order ID:", calculatedOrderId);
+
+    // Build a map original lineItemId → calculated lineItemId
+    const lineItemMap = new Map(
+      calculatedLineItems.map((edge: any) => [
+        edge.node.originalLineItem.id,
+        edge.node.id,
+      ])
+    );
+
+    const calcLineItemId = lineItemMap.get(item.id);
+    if (!calcLineItemId) {
+      console.error(`❌ No calculated line item found for ${item.id}`);
       continue;
     }
 
@@ -60,15 +84,13 @@ export async function POST(req: Request) {
       }`;
     await callShopify(removeMutation, {
       calculatedOrderId,
-      lineId: item.id,
+      lineId: calcLineItemId,
     });
-    console.log(`🗑️ Removed line item: ${item.id}`);
+    console.log(`🗑️ Removed line item: ${calcLineItemId}`);
 
     // -----------------------------
     // 3. Add the new variant
     // -----------------------------
-    // 👉 Here you need the new VARIANT ID you want to add.
-    // If you know the variant ID directly, use it:
     const newVariantId = await findVariantIdBySize(item.sku, item.size);
 
     const addMutation = `
@@ -132,16 +154,27 @@ async function findVariantIdBySize(productTag: string, size: string) {
         }
       }
     }`;
+
   const res = await fetch(shopifyEndpoint, {
     method: "POST",
     headers,
-    body: JSON.stringify({ query, variables: { query: `tag:${productTag}` } }),
+    body: JSON.stringify({
+      query, // GraphQL query string
+      variables: {
+        query: `tag:${productTag}`, // GraphQL variable "query"
+      },
+    }),
   });
+
   const json = await res.json();
 
   const variants =
     json?.data?.products?.edges?.[0]?.node?.variants?.edges || [];
   const match = variants.find((v: any) => v.node.title === size);
-  if (!match) throw new Error(`No variant found for size ${size}`);
+
+  if (!match) {
+    throw new Error(`No variant found for size ${size}`);
+  }
+
   return match.node.id;
 }
