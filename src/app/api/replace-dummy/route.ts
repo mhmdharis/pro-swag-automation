@@ -32,6 +32,16 @@ export async function POST(req: Request) {
         orderEditBegin(id: $id) {
           calculatedOrder {
             id
+            lineItems(first: 50) {
+              edges {
+                node {
+                  id
+                  originalLineItem {
+                    id
+                  }
+                }
+              }
+            }
           }
           userErrors {
             field
@@ -41,6 +51,14 @@ export async function POST(req: Request) {
       }`;
     const beginData = await callShopify(beginEditMutation, { id: orderId });
     const calculatedOrderId = beginData?.orderEditBegin?.calculatedOrder?.id;
+    const draftLineItems = beginData?.orderEditBegin?.calculatedOrder?.lineItems?.edges || [];
+    // Map original → calculated
+    const mapping: Record<string, string> = {};
+    for (const edge of draftLineItems) {
+      mapping[edge.node.originalLineItem.id] = edge.node.id;
+    }
+
+    const calculatedLineItemId = mapping[item.id]; // <- use this instead
     console.log("🆕 Calculated order ID:", calculatedOrderId);
 
     if (!calculatedOrderId) {
@@ -60,7 +78,7 @@ export async function POST(req: Request) {
       }`;
     await callShopify(removeMutation, {
       calculatedOrderId,
-      lineId: item.id,
+      lineId: calculatedLineItemId, // not item.id
     });
     console.log(`🗑️ Removed line item: ${item.id}`);
 
