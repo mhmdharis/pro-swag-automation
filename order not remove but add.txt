@@ -10,7 +10,7 @@ export async function POST(req: Request) {
 
     const shopifyFetch = async (query: string, variables: any) => {
       const res = await fetch(
-        `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-01/graphql.json`,
+        `https://${process.env.SHOPIFY_SHOP}/admin/api/2025-01/graphql.json`,
         {
           method: "POST",
           headers: {
@@ -23,23 +23,12 @@ export async function POST(req: Request) {
       return res.json();
     };
 
-    // 1. Begin edit and fetch current calculated line items
+    // 1. Begin edit
     const beginRes = await shopifyFetch(
       `
       mutation orderEditBegin($id: ID!) {
         orderEditBegin(id: $id) {
-          calculatedOrder {
-            id
-            lineItems(first: 100) {
-              edges {
-                node {
-                  id
-                  variant { id sku }
-                  quantity
-                }
-              }
-            }
-          }
+          calculatedOrder { id }
           userErrors { field message }
         }
       }
@@ -47,53 +36,66 @@ export async function POST(req: Request) {
       { id: orderId }
     );
 
-    const calculatedOrder = beginRes.data?.orderEditBegin?.calculatedOrder;
-    if (!calculatedOrder) {
+    const calculatedOrderId =
+      beginRes.data?.orderEditBegin?.calculatedOrder?.id;
+    if (!calculatedOrderId) {
       console.error("Failed to begin edit:", beginRes);
       return NextResponse.json({ error: "Failed to begin edit" }, { status: 500 });
     }
 
-    const calculatedOrderId = calculatedOrder.id;
-    const existingLineItems = calculatedOrder.lineItems?.edges || [];
-
-    // 2a. Remove all existing line items (set qty = 0)
-    for (const edge of existingLineItems) {
-      const cli = edge.node;
-      if (cli.quantity > 0) {
-        const removeRes = await shopifyFetch(
-          `
-          mutation orderEditSetQuantity($calculatedOrderId: ID!, $lineItemId: ID!, $quantity: Int!) {
-            orderEditSetQuantity(id: $calculatedOrderId, lineItemId: $lineItemId, quantity: $quantity) {
-              calculatedOrder { id }
-              userErrors { field message }
+    // 2. Fetch calculated order line items to map original → calculated IDs
+    const calcLineItemsRes = await shopifyFetch(
+      `
+      query($id: ID!) {
+        calculatedOrder(id: $id) {
+          lineItems(first: 50) {
+            edges {
+              node {
+                id
+                originalLineItem { id }
+              }
             }
           }
-          `,
-          { calculatedOrderId, lineItemId: cli.id, quantity: 0 }
-        );
-        console.log("Removed CLI:", cli.id, JSON.stringify(removeRes, null, 2));
-      }
-    }
+        }
+      }`,
+      { id: calculatedOrderId }
+    );
 
-    // 2b. Add the desired line items
+    const lineItemMap: Record<string, string> = {};
+    calcLineItemsRes.data?.calculatedOrder?.lineItems?.edges.forEach((edge: any) => {
+      const calcId = edge.node.id;
+      const origId = edge.node.originalLineItem?.id;
+      if (origId) {
+        lineItemMap[origId] = calcId;
+      }
+    });
+
+    console.log("LineItemMap:", lineItemMap);
+
+    // 3. Process each line item
     for (let i = 0; i < lineItems.length; i++) {
       const item = lineItems[i];
-      console.log(`--- Adding LineItem ${i} ---`, item);
+      console.log(`--- LineItem ${i} ---`);
+      console.log("original id:", item.id);
+
+      const calcLineItemId = lineItemMap[item.id];
+      if (!calcLineItemId) {
+        console.warn("No calculatedLineItemId found for", item.id);
+        continue;
+      }
+      console.log("calculatedLineItemId:", calcLineItemId);
 
       const parts = item.sku.split(",");
       const tags = parts.map((p: string) => p.trim());
       const size = item.size;
       const tagCandidate = tags.find((t: string) => t.endsWith("-SIZE"));
 
-      if (!tagCandidate) {
-        console.warn("No SIZE tag found in sku:", item.sku);
-        continue;
-      }
+      if (!tagCandidate) continue;
 
       const resolvedSku = tagCandidate.replace("SIZE", size);
-      console.log("Resolved SKU:", resolvedSku);
+      console.log("resolved SKU:", resolvedSku);
 
-      // Look up variant by SKU
+      // 3a. Look up variant
       const variantRes = await shopifyFetch(
         `
         query($query: String!) {
@@ -112,15 +114,33 @@ export async function POST(req: Request) {
         { query: `sku:${resolvedSku}` }
       );
 
-      const variant = variantRes.data?.productVariants?.edges?.[0]?.node;
+      const variant =
+        variantRes.data?.productVariants?.edges?.[0]?.node;
       if (!variant) {
         console.error("No variant found for", resolvedSku);
         continue;
       }
-
       const variantId = variant.id;
 
-      // Add variant
+      // 3b. Remove dummy (set qty = 0)
+      const removeRes = await shopifyFetch(
+        `
+        mutation orderEditSetQuantity($calculatedOrderId: ID!, $lineItemId: ID!, $quantity: Int!) {
+          orderEditSetQuantity(id: $calculatedOrderId, lineItemId: $lineItemId, quantity: $quantity) {
+            calculatedOrder { id }
+            userErrors { field message }
+          }
+        }
+        `,
+        {
+          calculatedOrderId,
+          lineItemId: calcLineItemId, // ✅ use calculatedLineItemId
+          quantity: 0,
+        }
+      );
+      console.log("orderEditSetQuantity response:", JSON.stringify(removeRes, null, 2));
+
+      // 3c. Add correct variant
       const addRes = await shopifyFetch(
         `
         mutation orderEditAddVariant($calculatedOrderId: ID!, $variantId: ID!, $quantity: Int!) {
@@ -141,13 +161,16 @@ export async function POST(req: Request) {
           }
         }
         `,
-        { calculatedOrderId, variantId, quantity: item.quantity || 1 }
+        {
+          calculatedOrderId,
+          variantId,
+          quantity: item.quantity || 1,
+        }
       );
-
-      console.log("Add variant response:", JSON.stringify(addRes, null, 2));
+      console.log("orderEditAddVariant response:", JSON.stringify(addRes, null, 2));
     }
 
-    // 3. Commit edit
+    // 4. Commit edit
     const commitRes = await shopifyFetch(
       `
       mutation orderEditCommit($calculatedOrderId: ID!) {
@@ -155,7 +178,7 @@ export async function POST(req: Request) {
           order {
             id
             name
-            lineItems(first: 20) {
+            lineItems(first: 10) {
               edges { node { id title quantity } }
             }
           }
@@ -165,8 +188,7 @@ export async function POST(req: Request) {
       `,
       { calculatedOrderId }
     );
-
-    console.log("Commit response:", JSON.stringify(commitRes, null, 2));
+    console.log("orderEditCommit response:", JSON.stringify(commitRes, null, 2));
 
     return NextResponse.json({ success: true, commitRes });
   } catch (err) {
