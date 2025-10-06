@@ -83,14 +83,18 @@ export async function POST(req: Request) {
       const parts = item.sku.split(",");
       const tags = parts.map((p: string) => p.trim());
       const size = item.size;
-      const tagCandidate = tags.find((t: string) => t.endsWith("-SIZE"));
+
+      // Find the tag that contains "SIZE" anywhere
+      const tagCandidate = tags.find((t: string) => t.includes("SIZE"));
 
       if (!tagCandidate) {
         console.warn("No SIZE tag found in sku:", item.sku);
         continue;
       }
 
-      const resolvedSku = tagCandidate.replace("SIZE", size);
+      // Replace all occurrences of "SIZE" with the actual size value
+      const resolvedSku = tagCandidate.replace(/SIZE/g, size);
+
       console.log("Resolved SKU:", resolvedSku);
 
       // Look up variant by SKU
