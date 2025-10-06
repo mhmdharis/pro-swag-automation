@@ -78,26 +78,24 @@ export async function POST(req: Request) {
     // 2b. Add the desired line items
     for (let i = 0; i < lineItems.length; i++) {
       const item = lineItems[i];
-      console.log(`--- Adding LineItem ${i} ---`, item);
+    console.log(`--- Adding LineItem ${i} ---`, item);
 
-      const parts = item.sku.split(",");
-      const tags = parts.map((p: string) => p.trim());
+    const parts = item.sku.split(",");
+    const tags = parts.map((p: string) => p.trim());
+    const size = item.size;
 
-      // Extract size from variantTitle (e.g. "Black / Large" → "Large")
-      const sizeParts = item.size ? item.size.split("/") : [];
-      const size = sizeParts.length > 1 ? sizeParts[sizeParts.length - 1].trim() : item.size?.trim();
+    // Find the tag that contains "SIZE" anywhere
+    const tagCandidate = tags.find((t: string) => t.includes("SIZE"));
 
-      const tagCandidate = tags.find((t: string) => t.includes("SIZE"));
+    if (!tagCandidate) {
+      console.warn("No SIZE tag found in sku:", item.sku);
+      continue;
+    }
 
-      if (!tagCandidate) {
-        console.warn("No SIZE tag found in sku:", item.sku);
-        continue;
-      }
+    // Replace all occurrences of "SIZE" with the actual size value
+    const resolvedSku = tagCandidate.replace(/SIZE/g, size);
 
-      // Replace all occurrences of "SIZE" with the actual size value
-      const resolvedSku = tagCandidate.replace(/SIZE/g, size);
-
-      console.log("Resolved SKU:", resolvedSku);
+    console.log("Resolved SKU:", resolvedSku);
 
       // Look up variant by SKU
       const variantRes = await shopifyFetch(
