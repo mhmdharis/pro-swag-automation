@@ -82,9 +82,11 @@ export async function POST(req: Request) {
 
       const parts = item.sku.split(",");
       const tags = parts.map((p: string) => p.trim());
-      const size = item.size;
 
-      // Find the tag that contains "SIZE" anywhere
+      // Extract size from variantTitle (e.g. "Black / Large" → "Large")
+      const sizeParts = item.size ? item.size.split("/") : [];
+      const size = sizeParts.length > 1 ? sizeParts[sizeParts.length - 1].trim() : item.size?.trim();
+
       const tagCandidate = tags.find((t: string) => t.includes("SIZE"));
 
       if (!tagCandidate) {
