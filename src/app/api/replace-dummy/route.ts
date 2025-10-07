@@ -79,14 +79,14 @@ export async function POST(req: Request) {
     // 2b. Add the desired line items
     for (let i = 0; i < lineItems.length; i++) {
       const item = lineItems[i];
-    console.log(`--- Adding LineItem ${i} ---`, item);
+      console.log(`--- Adding LineItem ${i} ---`, item);
 
-    const parts = item.sku.split(",");
-    const tags = parts.map((p: string) => p.trim());
-    const size = item.size;
+      const parts = item.sku.split(",");
+      const tags = parts.map((p: string) => p.trim());
+      const size = item.size;
 
-    // Find the tag that contains "SIZE" anywhere
-    const tagCandidate = tags.find((t: string) => t.includes("SIZE"));
+      // Find the tag that contains "SIZE" anywhere
+      const tagCandidate = tags.find((t: string) => t.endsWith("-SIZE"));
 
     if (!tagCandidate) {
       console.warn("No SIZE tag found in sku:", item.sku);
@@ -94,7 +94,7 @@ export async function POST(req: Request) {
     }
 
     // Replace all occurrences of "SIZE" with the actual size value
-    const resolvedSku = tagCandidate.replace(/SIZE/g, size);
+    const resolvedSku = tagCandidate.replace("SIZE", size);
 
     console.log("Resolved SKU:", resolvedSku);
 
