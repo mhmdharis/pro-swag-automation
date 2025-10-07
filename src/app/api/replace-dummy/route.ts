@@ -7,6 +7,7 @@ export async function POST(req: Request) {
     const { orderId, lineItems } = body;
 
     console.log("lineItems count:", lineItems.length);
+    console.log("lineItems:", lineItems);
 
     const shopifyFetch = async (query: string, variables: any) => {
       const res = await fetch(
