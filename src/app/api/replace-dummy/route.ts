@@ -86,7 +86,7 @@ export async function POST(req: Request) {
 
       // Extract size from variantTitle (e.g. "Black / Large" → "Large")
       const sizeParts = item.size ? item.size.split("/") : [];
-      const size = sizeParts.length > 1 ? sizeParts[sizeParts.length - 1].trim() : item.size?.trim();
+      let size = sizeParts.length > 1 ? sizeParts[sizeParts.length - 1].trim() : item.size?.trim();
 
       const tagCandidate = tags.find((t: string) => t.includes("SIZE"));
 
@@ -95,11 +95,16 @@ export async function POST(req: Request) {
         continue;
       }
 
+      // ✅ If youth size (YXS, YS, YM, YL, YXL) → remove "Y"
+      const youthSizes = ["YXS", "YS", "YM", "YL", "YXL"];
+      if (size && youthSizes.includes(size.toUpperCase())) {
+        size = size.substring(1); // remove the leading 'Y'
+      }
+
       // Replace all occurrences of "SIZE" with the actual size value
       const resolvedSku = tagCandidate.replace(/SIZE/g, size);
 
       console.log("Resolved SKU:", resolvedSku);
-
 
       // Look up variant by SKU
       const variantRes = await shopifyFetch(
