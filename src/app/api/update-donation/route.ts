@@ -20,7 +20,7 @@ async function shopifyFetch(query: string, variables: any = {}) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    console.log("🧾 Received update-donation body:", JSON.stringify(body, null, 2));
+    console.log("Received update-donation body:", JSON.stringify(body, null, 2));
 
     const orderTotal = parseFloat(body.orderTotal);
     if (isNaN(orderTotal)) {
@@ -28,9 +28,9 @@ export async function POST(req: Request) {
     }
 
     const donationAmount = orderTotal * 0.25;
-    console.log("💰 Order total:", orderTotal, "→ Donation (25%):", donationAmount);
+    console.log("Order total:", orderTotal, "→ Donation (25%):", donationAmount);
 
-    // 1️⃣ Fetch Marble Falls page by title
+    // 1️ Fetch Marble Falls page by title
     const pageRes = await shopifyFetch(
       `
       {
@@ -50,14 +50,14 @@ export async function POST(req: Request) {
     );
 
     if (!marblePage) {
-      console.error("❌ Marble Falls page not found");
+      console.error("Marble Falls page not found");
       return NextResponse.json({ error: "Marble Falls page not found" }, { status: 404 });
     }
 
     const pageId = marblePage.node.id;
-    console.log("📄 Found Marble Falls page:", marblePage.node.title, pageId);
+    console.log("Found Marble Falls page:", marblePage.node.title, pageId);
 
-    // 2️⃣ Fetch current metafield value
+    // 2️ Fetch current metafield value
     const metafieldRes = await shopifyFetch(
       `
       query getPageMetafield($ownerId: ID!) {
@@ -83,9 +83,9 @@ export async function POST(req: Request) {
     const existingValue = existingField ? parseFloat(existingField.node.value) : 0;
     const newTotal = existingValue + donationAmount;
 
-    console.log(`🔢 Existing total: ${existingValue} → New total: ${newTotal}`);
+    console.log(`Existing total: ${existingValue} → New total: ${newTotal}`);
 
-    // 3️⃣ Create or update metafield
+    // 3️ Create or update metafield
     const saveRes = await shopifyFetch(
       `
       mutation upsertMetafield($input: MetafieldInput!) {
@@ -112,7 +112,7 @@ export async function POST(req: Request) {
       }
     );
 
-    console.log("✅ Metafield update response:", JSON.stringify(saveRes, null, 2));
+    console.log("Metafield update response:", JSON.stringify(saveRes, null, 2));
 
     return NextResponse.json({
       success: true,
@@ -120,7 +120,7 @@ export async function POST(req: Request) {
       newTotal,
     });
   } catch (err) {
-    console.error("❌ Error in /api/update-donation:", err);
+    console.error("Error in /api/update-donation:", err);
     return NextResponse.json(
       { success: false, error: (err as Error).message },
       { status: 500 }
