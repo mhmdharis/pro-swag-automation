@@ -13,6 +13,7 @@ async function shopifyFetch(query: string, variables: any = {}) {
       body: JSON.stringify({ query, variables }),
     }
   );
+
   const data = await res.json();
   return data;
 }
@@ -30,7 +31,7 @@ export async function POST(req: Request) {
     const donationAmount = orderTotal * 0.25;
     console.log("Order total:", orderTotal, "→ Donation (25%):", donationAmount);
 
-    // 1️ Fetch Marble Falls page by title
+    // 1️⃣ Fetch Marble Falls page by title
     const pageRes = await shopifyFetch(
       `
       {
@@ -43,7 +44,7 @@ export async function POST(req: Request) {
       `
     );
 
-    const marblePage = pageRes.data.pages.edges.find(
+    const marblePage = pageRes.data?.pages?.edges.find(
       (edge: any) =>
         edge.node.title.toLowerCase().includes("marble") &&
         edge.node.title.toLowerCase().includes("falls")
@@ -57,66 +58,77 @@ export async function POST(req: Request) {
     const pageId = marblePage.node.id;
     console.log("Found Marble Falls page:", marblePage.node.title, pageId);
 
-    // 2️ Fetch current metafield value
+    // 2️⃣ Fetch current metafield value (namespace: custom)
     const metafieldRes = await shopifyFetch(
-        `
-        query getPageMetafields($id: ID!) {
-          page(id: $id) {
-            metafields(first: 10, namespace: "custom") {
-              edges {
-                node {
-                  id
-                  key
-                  namespace
-                  value
-                }
+      `
+      query getPageMetafields($id: ID!) {
+        page(id: $id) {
+          metafields(first: 10, namespace: "custom") {
+            edges {
+              node {
+                id
+                key
+                value
               }
             }
           }
         }
-        `,
-        { id: pageId }
+      }
+      `,
+      { id: pageId }
     );
-      
 
-    const metafields = metafieldRes.data.page?.metafields?.edges || [];
+    const metafields = metafieldRes.data?.page?.metafields?.edges || [];
     const existingField = metafields.find(
-        (edge: any) => edge.node.key === "total_donations"
+      (edge: any) => edge.node.key === "total_donations"
     );
-
-    const existingValue = existingField ? parseFloat(existingField.node.value) : 0;
+    const existingValue = parseFloat(existingField?.node?.value ?? "0");
     const newTotal = existingValue + donationAmount;
 
     console.log(`Existing total: ${existingValue} → New total: ${newTotal}`);
 
-    // 3️ Create or update metafield
+    // 3️⃣ Create or update metafield using `metafieldsSet`
     const saveRes = await shopifyFetch(
       `
-      mutation upsertMetafield($input: MetafieldInput!) {
-        metafieldUpsert(input: $input) {
-          metafield {
+      mutation setMetafields($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields {
             id
             key
             namespace
             value
             type
           }
-          userErrors { field message }
+          userErrors {
+            field
+            message
+          }
         }
       }
       `,
       {
-        input: {
-          namespace: "custom",
-          key: "total_donations",
-          type: "number_decimal",
-          value: newTotal.toFixed(2),
-          ownerId: pageId,
-        },
+        metafields: [
+          {
+            namespace: "custom",
+            key: "total_donations",
+            type: "number_decimal",
+            value: newTotal.toFixed(2),
+            ownerId: pageId,
+          },
+        ],
       }
     );
 
     console.log("Metafield update response:", JSON.stringify(saveRes, null, 2));
+
+    const userErrors = saveRes.data?.metafieldsSet?.userErrors || [];
+    if (userErrors.length > 0) {
+      console.error("Shopify user errors:", userErrors);
+      return NextResponse.json(
+        { success: false, errors: userErrors },
+        { status: 400 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
