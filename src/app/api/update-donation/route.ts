@@ -13,7 +13,6 @@ async function shopifyFetch(query: string, variables: any = {}) {
       body: JSON.stringify({ query, variables }),
     }
   );
-
   const data = await res.json();
   return data;
 }
@@ -31,9 +30,8 @@ export async function POST(req: Request) {
     const donationAmount = orderTotal * 0.25;
     console.log("Order total:", orderTotal, "→ Donation (25%):", donationAmount);
 
-    // 1️⃣ Fetch Marble Falls page by title
-    const pageRes = await shopifyFetch(
-      `
+    // 1️⃣ Find Marble Falls page
+    const pageRes = await shopifyFetch(`
       {
         pages(first: 100) {
           edges {
@@ -41,8 +39,7 @@ export async function POST(req: Request) {
           }
         }
       }
-      `
-    );
+    `);
 
     const marblePage = pageRes.data?.pages?.edges.find(
       (edge: any) =>
@@ -58,7 +55,7 @@ export async function POST(req: Request) {
     const pageId = marblePage.node.id;
     console.log("Found Marble Falls page:", marblePage.node.title, pageId);
 
-    // 2️⃣ Fetch current metafield value (namespace: custom)
+    // 2️⃣ Fetch current metafield value
     const metafieldRes = await shopifyFetch(
       `
       query getPageMetafields($id: ID!) {
@@ -82,12 +79,15 @@ export async function POST(req: Request) {
     const existingField = metafields.find(
       (edge: any) => edge.node.key === "total_donations"
     );
-    const existingValue = parseFloat(existingField?.node?.value ?? "0");
-    const newTotal = existingValue + donationAmount;
 
+    const rawValue = existingField?.node?.value ?? "0";
+    const numericValue = parseFloat(rawValue.replace(/[^0-9.-]/g, ""));
+    const existingValue = isNaN(numericValue) ? 0 : numericValue;
+
+    const newTotal = existingValue + donationAmount;
     console.log(`Existing total: ${existingValue} → New total: ${newTotal}`);
 
-    // 3️⃣ Create or update metafield using `metafieldsSet`
+    // 3️⃣ Update metafield (type must match existing: "money")
     const saveRes = await shopifyFetch(
       `
       mutation setMetafields($metafields: [MetafieldsSetInput!]!) {
@@ -111,7 +111,7 @@ export async function POST(req: Request) {
           {
             namespace: "custom",
             key: "total_donations",
-            type: "number_decimal",
+            type: "money",
             value: newTotal.toFixed(2),
             ownerId: pageId,
           },
