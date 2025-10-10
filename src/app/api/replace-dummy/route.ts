@@ -181,6 +181,67 @@ export async function POST(req: Request) {
 
     console.log("Commit response:", JSON.stringify(commitRes, null, 2));
 
+    // --- Step 4: Update metafield on "Marble Falls" page ---
+    const orderTotal = body.total_price || 0; // Flow might include total_price
+    const donationAmount = orderTotal * 0.25;
+
+    // Fetch current metafield
+    const getMetaRes = await shopifyFetch(
+      `
+      query {
+        page(handle: "marble-falls") {
+          id
+          metafield(namespace: "custom", key: "total_donations") {
+            id
+            value
+          }
+        }
+      }
+      `,
+      {}
+    );
+
+    const metafield = getMetaRes.data?.page?.metafield;
+    const pageId = getMetaRes.data?.page?.id;
+    let currentDonation = parseFloat(metafield?.value || "0");
+
+    const newTotal = (currentDonation + donationAmount / 100).toFixed(2); // divide by 100 if Flow sends cents
+
+    // Update metafield
+    const updateRes = await shopifyFetch(
+      `
+      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields {
+            id
+            key
+            value
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+      `,
+      {
+        metafields: [
+          {
+            ownerId: pageId,
+            namespace: "custom",
+            key: "total_donations",
+            type: "money",
+            value: JSON.stringify({
+              amount: newTotal,
+              currency_code: "USD",
+            }),
+          },
+        ],
+      }
+    );
+
+    console.log("✅ Updated total_donations metafield:", JSON.stringify(updateRes, null, 2));    
+
     return NextResponse.json({ success: true, commitRes });
   } catch (err) {
     console.error("Error in /api/replace-dummy:", err);
