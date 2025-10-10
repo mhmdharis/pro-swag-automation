@@ -59,25 +59,29 @@ export async function POST(req: Request) {
 
     // 2️ Fetch current metafield value
     const metafieldRes = await shopifyFetch(
-      `
-      query getPageMetafield($ownerId: ID!) {
-        metafields(first: 10, ownerId: $ownerId, namespace: "custom") {
-          edges {
-            node {
-              id
-              namespace
-              key
-              value
+        `
+        query getPageMetafields($id: ID!) {
+          page(id: $id) {
+            metafields(first: 10, namespace: "custom") {
+              edges {
+                node {
+                  id
+                  key
+                  namespace
+                  value
+                }
+              }
             }
           }
         }
-      }
-      `,
-      { ownerId: pageId }
+        `,
+        { id: pageId }
     );
+      
 
-    const existingField = metafieldRes.data.metafields.edges.find(
-      (edge: any) => edge.node.key === "total_donations"
+    const metafields = metafieldRes.data.page?.metafields?.edges || [];
+    const existingField = metafields.find(
+        (edge: any) => edge.node.key === "total_donations"
     );
 
     const existingValue = existingField ? parseFloat(existingField.node.value) : 0;
