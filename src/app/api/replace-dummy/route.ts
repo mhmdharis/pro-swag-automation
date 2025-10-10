@@ -181,66 +181,59 @@ export async function POST(req: Request) {
 
     console.log("Commit response:", JSON.stringify(commitRes, null, 2));
 
-    // --- Step 4: Update metafield on "Marble Falls" page ---
-    const orderTotal = body.total_price || 0; // Flow might include total_price
-    const donationAmount = orderTotal * 0.25;
+    // After commitRes
+const totalAmount = parseFloat(
+  commitRes.data?.orderEditCommit?.order?.currentTotalPriceSet?.shopMoney?.amount || "0"
+);
+const donationAmount = (totalAmount * 0.25).toFixed(2);
 
-    // Fetch current metafield
-    const getMetaRes = await shopifyFetch(
-      `
-      query {
-        page(handle: "marble-falls") {
-          id
-          metafield(namespace: "custom", key: "total_donations") {
-            id
-            value
-          }
-        }
+console.log("Order total:", totalAmount, "→ Donation (25%):", donationAmount);
+
+// 1️ Fetch marble-falls page ID
+const pageRes = await shopifyFetch(
+  `
+  {
+    pages(first: 1, query: "title:marble falls") {
+      edges {
+        node { id title }
       }
-      `,
-      {}
-    );
+    }
+  }
+  `,
+  {}
+);
 
-    const metafield = getMetaRes.data?.page?.metafield;
-    const pageId = getMetaRes.data?.page?.id;
-    let currentDonation = parseFloat(metafield?.value || "0");
+const pageId = pageRes.data?.pages?.edges?.[0]?.node?.id;
+if (!pageId) {
+  console.error("Marble Falls page not found");
+  return NextResponse.json({ error: "Page not found" }, { status: 404 });
+}
 
-    const newTotal = (currentDonation + donationAmount / 100).toFixed(2); // divide by 100 if Flow sends cents
-
-    // Update metafield
-    const updateRes = await shopifyFetch(
-      `
-      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
-        metafieldsSet(metafields: $metafields) {
-          metafields {
-            id
-            key
-            value
-          }
-          userErrors {
-            field
-            message
-          }
-        }
-      }
-      `,
+// 2️ Update metafield
+const metaRes = await shopifyFetch(
+  `
+  mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+    metafieldsSet(metafields: $metafields) {
+      metafields { id namespace key value type }
+      userErrors { field message }
+    }
+  }
+  `,
+  {
+    metafields: [
       {
-        metafields: [
-          {
-            ownerId: pageId,
-            namespace: "custom",
-            key: "total_donations",
-            type: "money",
-            value: JSON.stringify({
-              amount: newTotal,
-              currency_code: "USD",
-            }),
-          },
-        ],
-      }
-    );
+        ownerId: pageId,
+        namespace: "custom",
+        key: "total_donations",
+        type: "number_decimal",
+        value: donationAmount,
+      },
+    ],
+  }
+);
 
-    console.log("✅ Updated total_donations metafield:", JSON.stringify(updateRes, null, 2));    
+console.log("Metafield update result:", JSON.stringify(metaRes, null, 2));
+
 
     return NextResponse.json({ success: true, commitRes });
   } catch (err) {
