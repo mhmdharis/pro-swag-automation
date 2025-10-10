@@ -188,21 +188,49 @@ const totalAmount = parseFloat(
 const donationAmount = (totalAmount * 0.25).toFixed(2);
 console.log("Order total:", totalAmount, "→ Donation (25%):", donationAmount);
 
-// 2️⃣ Get Marble Falls page by handle
-const pageRes = await shopifyFetch(
-  `
-  {
-    pages(first: 1, query: "handle:marble-falls") {
-      edges { node { id title handle } }
+// 2️⃣ Try to fetch "Marble Falls" page via REST
+let pageId = null;
+try {
+  const res = await fetch(
+    `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-01/pages.json?handle=marble-falls`,
+    {
+      headers: {
+        "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_API_TOKEN!,
+        "Content-Type": "application/json",
+      },
     }
+  );
+  const data = await res.json();
+  if (data.pages?.[0]?.id) {
+    pageId = `gid://shopify/Page/${data.pages[0].id}`;
   }
-  `,
-  {}
-);
+} catch (err) {
+  console.error("Error fetching page via REST:", err);
+}
 
-const pageId = pageRes.data?.pages?.edges?.[0]?.node?.id;
 if (!pageId) {
-  console.error("Marble Falls page not found", pageRes);
+  // fallback — fetch all and match manually
+  const pageListRes = await shopifyFetch(
+    `
+    {
+      pages(first: 100) {
+        edges {
+          node { id title handle }
+        }
+      }
+    }
+    `,
+    {}
+  );
+  const pages = pageListRes.data?.pages?.edges?.map((e: any) => e.node) || [];
+  const marblePage = pages.find(
+    (p: any) => p.handle === "marble-falls" || p.title.toLowerCase().includes("marble falls")
+  );
+  pageId = marblePage?.id;
+}
+
+if (!pageId) {
+  console.error("Marble Falls page not found");
   return NextResponse.json({ error: "Page not found" }, { status: 404 });
 }
 
@@ -230,7 +258,6 @@ const metaRes = await shopifyFetch(
 );
 
 console.log("Metafield update result:", JSON.stringify(metaRes, null, 2));
-
 
 
     return NextResponse.json({ success: true, commitRes });
