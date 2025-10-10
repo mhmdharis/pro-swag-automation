@@ -30,7 +30,7 @@ export async function POST(req: Request) {
     const donationAmount = orderTotal * 0.25;
     console.log("Order total:", orderTotal, "→ Donation (25%):", donationAmount);
 
-    // 1️⃣ Find Marble Falls page
+    // 1️ Find Marble Falls page
     const pageRes = await shopifyFetch(`
       {
         pages(first: 100) {
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
     const pageId = marblePage.node.id;
     console.log("Found Marble Falls page:", marblePage.node.title, pageId);
 
-    // 2️⃣ Fetch current metafield value
+    // 2️ Fetch current metafield value
     const metafieldRes = await shopifyFetch(
       `
       query getPageMetafields($id: ID!) {
@@ -87,37 +87,40 @@ export async function POST(req: Request) {
     const newTotal = existingValue + donationAmount;
     console.log(`Existing total: ${existingValue} → New total: ${newTotal}`);
 
-    // 3️⃣ Update metafield (type must match existing: "money")
+    // 3️ Update metafield (type must match existing: "money")
     const saveRes = await shopifyFetch(
-      `
-      mutation setMetafields($metafields: [MetafieldsSetInput!]!) {
+        `
+        mutation setMetafields($metafields: [MetafieldsSetInput!]!) {
         metafieldsSet(metafields: $metafields) {
-          metafields {
+            metafields {
             id
             key
             namespace
             value
             type
-          }
-          userErrors {
+            }
+            userErrors {
             field
             message
-          }
+            }
         }
-      }
-      `,
-      {
+        }
+        `,
+        {
         metafields: [
-          {
+            {
             namespace: "custom",
             key: "total_donations",
             type: "money",
-            value: newTotal.toFixed(2),
+            value: JSON.stringify({
+                amount: parseFloat(newTotal.toFixed(2)),
+                currency_code: "USD", // change if your store uses another currency
+            }),
             ownerId: pageId,
-          },
+            },
         ],
-      }
-    );
+        }
+    );  
 
     console.log("Metafield update response:", JSON.stringify(saveRes, null, 2));
 
