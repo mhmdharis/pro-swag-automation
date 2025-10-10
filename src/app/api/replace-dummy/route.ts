@@ -181,22 +181,19 @@ export async function POST(req: Request) {
 
     console.log("Commit response:", JSON.stringify(commitRes, null, 2));
 
-    // After commitRes
+   // 1️⃣ Get order total
 const totalAmount = parseFloat(
   commitRes.data?.orderEditCommit?.order?.currentTotalPriceSet?.shopMoney?.amount || "0"
 );
 const donationAmount = (totalAmount * 0.25).toFixed(2);
-
 console.log("Order total:", totalAmount, "→ Donation (25%):", donationAmount);
 
-// 1️ Fetch marble-falls page ID
+// 2️⃣ Get Marble Falls page by handle
 const pageRes = await shopifyFetch(
   `
   {
-    pages(first: 1, query: "title:marble falls") {
-      edges {
-        node { id title }
-      }
+    pages(first: 1, query: "handle:marble-falls") {
+      edges { node { id title handle } }
     }
   }
   `,
@@ -205,11 +202,11 @@ const pageRes = await shopifyFetch(
 
 const pageId = pageRes.data?.pages?.edges?.[0]?.node?.id;
 if (!pageId) {
-  console.error("Marble Falls page not found");
+  console.error("Marble Falls page not found", pageRes);
   return NextResponse.json({ error: "Page not found" }, { status: 404 });
 }
 
-// 2️ Update metafield
+// 3️⃣ Update metafield
 const metaRes = await shopifyFetch(
   `
   mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
@@ -233,6 +230,7 @@ const metaRes = await shopifyFetch(
 );
 
 console.log("Metafield update result:", JSON.stringify(metaRes, null, 2));
+
 
 
     return NextResponse.json({ success: true, commitRes });
