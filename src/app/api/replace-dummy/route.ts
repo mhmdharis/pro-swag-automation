@@ -83,49 +83,49 @@ export async function POST(req: Request) {
     // 🧩 3. Set quantity = 0 only for matching SKUs or product tags (Marble Falls)
     for (const edge of existingLineItems) {
       const cli = edge.node;
+      const variantId = cli.variant?.id;
       const sku = cli.variant?.sku;
       let matchFound = false;
 
       if (cli.quantity <= 0) continue;
 
       if (sku) {
-        // Case 1: Variant SKU exists
+        // Case 1: Variant has a SKU → direct match
         if (resolvedSkuList.includes(sku)) {
           matchFound = true;
+          console.log(`Matched by SKU: ${sku}`);
         }
-      } else {
-        // Case 2: SKU is null — fetch product tags and compare
-        const productId = cli.variant?.id?.replace("/Variant/", "/Product/");
-        if (productId) {
-          const productRes = await shopifyFetch(
-            `
-            query getProductTags($id: ID!) {
-              product(id: $id) {
+      } else if (variantId) {
+        // Case 2: SKU is null → fetch product tags via variant ID
+        const variantRes = await shopifyFetch(
+          `
+          query getProductTagsFromVariant($variantId: ID!) {
+            productVariant(id: $variantId) {
+              id
+              product {
                 id
                 title
                 tags
               }
             }
-            `,
-            { id: productId }
-          );
-
-          const tags = productRes.data?.product?.tags || [];
-          if (tags.some((tag: string) => resolvedSkuList.includes(tag))) {
-            matchFound = true;
           }
+          `,
+          { variantId }
+        );
 
+        const tags = variantRes.data?.productVariant?.product?.tags || [];
+        if (tags.some((tag: string) => resolvedSkuList.includes(tag))) {
+          matchFound = true;
           console.log(
-            `Checked product tags for ${productId}:`,
-            tags,
-            "Matched:",
-            matchFound
+            `Matched by product tags for variant ${variantId}:`,
+            tags
           );
         }
       }
 
+      // 🧹 Set quantity to 0 only for matched Marble Falls items
       if (matchFound) {
-        console.log(`Setting quantity 0 for Marble Falls item (SKU or tag match).`);
+        console.log(`Setting quantity 0 for Marble Falls item...`);
 
         const removeRes = await shopifyFetch(
           `
