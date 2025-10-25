@@ -131,6 +131,7 @@ export async function POST(req: Request) {
         console.log(`Setting quantity 0 for Marble Falls item...`);
         previousQuantities[sku] = cli.quantity;
         console.log("previous Quantity", previousQuantities[sku])
+        console.log("quantity SKU", sku)
         const removeRes = await shopifyFetch(
           `
           mutation orderEditSetQuantity(
@@ -200,7 +201,9 @@ export async function POST(req: Request) {
         continue;
       }
       const savedQty = previousQuantities[variant.sku];
+      console.log(variant)
       console.log("saved Qty", savedQty);
+      console.log("variant SKU", variant.sku)
       const addRes = await shopifyFetch(
         `
         mutation orderEditAddVariant(
