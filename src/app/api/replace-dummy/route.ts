@@ -85,6 +85,8 @@ export async function POST(req: Request) {
     const existingLineItems = calculatedOrder.lineItems?.edges || [];
 
     // 🧩 3. Set quantity = 0 only for matching SKUs or product tags (Marble Falls)
+    // Store the quantity before removal
+    const previousQuantities: Record<string, number> = {};
     for (const edge of existingLineItems) {
       const cli = edge.node;
       const variantId = cli.variant?.id;
@@ -127,7 +129,8 @@ export async function POST(req: Request) {
       // 🧹 Set quantity to 0 only for matched Marble Falls items
       if (matchFound) {
         console.log(`Setting quantity 0 for Marble Falls item...`);
-    
+        previousQuantities[sku] = cli.quantity;
+        console.log("previous Quantity", previousQuantities[sku])
         const removeRes = await shopifyFetch(
           `
           mutation orderEditSetQuantity(
