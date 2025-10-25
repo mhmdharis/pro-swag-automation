@@ -112,7 +112,7 @@ export async function POST(req: Request) {
           `,
           { variantId }
         );
-
+        console.log("Get Product ID from variant", variantRes)
         const tags = variantRes.data?.productVariant?.product?.tags || [];
         if (tags.some((tag: string) => resolvedSkuList.includes(tag))) {
           matchFound = true;
