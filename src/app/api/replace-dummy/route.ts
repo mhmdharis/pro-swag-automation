@@ -6,9 +6,6 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { orderId, lineItems } = body;
 
-    console.log("lineItems count:", lineItems.length);
-    console.log("lineItems:", lineItems);
-
     const shopifyFetch = async (query: string, variables: any) => {
       const res = await fetch(
         `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-01/graphql.json`,
@@ -24,7 +21,33 @@ export async function POST(req: Request) {
       return res.json();
     };
 
-    // 1. Begin edit and fetch current calculated line items
+    // 🧩 1. Pre-resolve all Marble Falls SKUs that should be modified
+    const resolvedSkuList: string[] = [];
+
+    for (const item of lineItems) {
+      const parts = item.sku.split(",");
+      const tags = parts.map((p: string) => p.trim());
+      const sizeParts = item.size ? item.size.split("/") : [];
+      let size =
+        sizeParts.length > 1
+          ? sizeParts[sizeParts.length - 1].trim()
+          : item.size?.trim();
+
+      const tagCandidate = tags.find((t: string) => t.includes("SIZE"));
+      if (!tagCandidate) continue;
+
+      const youthSizes = ["YXS", "YS", "YM", "YL", "YXL"];
+      if (size && youthSizes.includes(size.toUpperCase())) {
+        size = size.substring(1); // remove 'Y'
+      }
+
+      const resolvedSku = tagCandidate.replace(/SIZE/g, size);
+      resolvedSkuList.push(resolvedSku);
+    }
+
+    console.log("Resolved Marble Falls SKUs:", resolvedSkuList);
+
+    // 🧩 2. Begin edit and fetch order line items
     const beginRes = await shopifyFetch(
       `
       mutation orderEditBegin($id: ID!) {
@@ -57,14 +80,26 @@ export async function POST(req: Request) {
     const calculatedOrderId = calculatedOrder.id;
     const existingLineItems = calculatedOrder.lineItems?.edges || [];
 
-    // 2a. Remove all existing line items (set qty = 0)
+    // 🧩 3. Set quantity = 0 only for matching SKUs (Marble Falls)
     for (const edge of existingLineItems) {
       const cli = edge.node;
-      if (cli.quantity > 0) {
+      const sku = cli.variant?.sku;
+
+      if (cli.quantity > 0 && resolvedSkuList.includes(sku)) {
+        console.log(`Setting quantity 0 for Marble Falls SKU: ${sku}`);
+
         const removeRes = await shopifyFetch(
           `
-          mutation orderEditSetQuantity($calculatedOrderId: ID!, $lineItemId: ID!, $quantity: Int!) {
-            orderEditSetQuantity(id: $calculatedOrderId, lineItemId: $lineItemId, quantity: $quantity) {
+          mutation orderEditSetQuantity(
+            $calculatedOrderId: ID!,
+            $lineItemId: ID!,
+            $quantity: Int!
+          ) {
+            orderEditSetQuantity(
+              id: $calculatedOrderId,
+              lineItemId: $lineItemId,
+              quantity: $quantity
+            ) {
               calculatedOrder { id }
               userErrors { field message }
             }
@@ -72,41 +107,32 @@ export async function POST(req: Request) {
           `,
           { calculatedOrderId, lineItemId: cli.id, quantity: 0 }
         );
+
         console.log("Removed CLI:", cli.id, JSON.stringify(removeRes, null, 2));
       }
     }
 
-    // 2b. Add the desired line items
-    for (let i = 0; i < lineItems.length; i++) {
-      const item = lineItems[i];
-      console.log(`--- Adding LineItem ${i} ---`, item);
-
+    // 🧩 4. Add the resolved Marble Falls variants (same logic as before)
+    for (const item of lineItems) {
       const parts = item.sku.split(",");
       const tags = parts.map((p: string) => p.trim());
-
-      // Extract size from variantTitle (e.g. "Black / Large" → "Large")
       const sizeParts = item.size ? item.size.split("/") : [];
-      let size = sizeParts.length > 1 ? sizeParts[sizeParts.length - 1].trim() : item.size?.trim();
+      let size =
+        sizeParts.length > 1
+          ? sizeParts[sizeParts.length - 1].trim()
+          : item.size?.trim();
 
       const tagCandidate = tags.find((t: string) => t.includes("SIZE"));
+      if (!tagCandidate) continue;
 
-      if (!tagCandidate) {
-        console.warn("No SIZE tag found in sku:", item.sku);
-        continue;
-      }
-
-      // ✅ If youth size (YXS, YS, YM, YL, YXL) → remove "Y"
       const youthSizes = ["YXS", "YS", "YM", "YL", "YXL"];
       if (size && youthSizes.includes(size.toUpperCase())) {
-        size = size.substring(1); // remove the leading 'Y'
+        size = size.substring(1);
       }
 
-      // Replace all occurrences of "SIZE" with the actual size value
       const resolvedSku = tagCandidate.replace(/SIZE/g, size);
+      console.log("Resolved SKU to add:", resolvedSku);
 
-      console.log("Resolved SKU:", resolvedSku);
-
-      // Look up variant by SKU
       const variantRes = await shopifyFetch(
         `
         query($query: String!) {
@@ -131,13 +157,18 @@ export async function POST(req: Request) {
         continue;
       }
 
-      const variantId = variant.id;
-
-      // Add variant
       const addRes = await shopifyFetch(
         `
-        mutation orderEditAddVariant($calculatedOrderId: ID!, $variantId: ID!, $quantity: Int!) {
-          orderEditAddVariant(id: $calculatedOrderId, variantId: $variantId, quantity: $quantity) {
+        mutation orderEditAddVariant(
+          $calculatedOrderId: ID!,
+          $variantId: ID!,
+          $quantity: Int!
+        ) {
+          orderEditAddVariant(
+            id: $calculatedOrderId,
+            variantId: $variantId,
+            quantity: $quantity
+          ) {
             calculatedOrder {
               id
               addedLineItems(first: 5) {
@@ -154,13 +185,13 @@ export async function POST(req: Request) {
           }
         }
         `,
-        { calculatedOrderId, variantId, quantity: item.quantity || 1 }
+        { calculatedOrderId, variantId: variant.id, quantity: item.quantity || 1 }
       );
 
-      console.log("Add variant response:", JSON.stringify(addRes, null, 2));
+      console.log("Added variant response:", JSON.stringify(addRes, null, 2));
     }
 
-    // 3. Commit edit
+    // 🧩 5. Commit edit
     const commitRes = await shopifyFetch(
       `
       mutation orderEditCommit($calculatedOrderId: ID!) {
