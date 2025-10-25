@@ -80,13 +80,52 @@ export async function POST(req: Request) {
     const calculatedOrderId = calculatedOrder.id;
     const existingLineItems = calculatedOrder.lineItems?.edges || [];
 
-    // 🧩 3. Set quantity = 0 only for matching SKUs (Marble Falls)
+    // 🧩 3. Set quantity = 0 only for matching SKUs or product tags (Marble Falls)
     for (const edge of existingLineItems) {
       const cli = edge.node;
       const sku = cli.variant?.sku;
+      let matchFound = false;
 
-      if (cli.quantity > 0 && resolvedSkuList.includes(sku)) {
-        console.log(`Setting quantity 0 for Marble Falls SKU: ${sku}`);
+      if (cli.quantity <= 0) continue;
+
+      if (sku) {
+        // Case 1: Variant SKU exists
+        if (resolvedSkuList.includes(sku)) {
+          matchFound = true;
+        }
+      } else {
+        // Case 2: SKU is null — fetch product tags and compare
+        const productId = cli.variant?.id?.replace("/Variant/", "/Product/");
+        if (productId) {
+          const productRes = await shopifyFetch(
+            `
+            query getProductTags($id: ID!) {
+              product(id: $id) {
+                id
+                title
+                tags
+              }
+            }
+            `,
+            { id: productId }
+          );
+
+          const tags = productRes.data?.product?.tags || [];
+          if (tags.some((tag: string) => resolvedSkuList.includes(tag))) {
+            matchFound = true;
+          }
+
+          console.log(
+            `Checked product tags for ${productId}:`,
+            tags,
+            "Matched:",
+            matchFound
+          );
+        }
+      }
+
+      if (matchFound) {
+        console.log(`Setting quantity 0 for Marble Falls item (SKU or tag match).`);
 
         const removeRes = await shopifyFetch(
           `
