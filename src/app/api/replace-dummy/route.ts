@@ -199,7 +199,8 @@ export async function POST(req: Request) {
         console.error("No variant found for", resolvedSku);
         continue;
       }
-
+      const savedQty = previousQuantities[variant.sku];
+      console.log("saved Qty", savedQty);
       const addRes = await shopifyFetch(
         `
         mutation orderEditAddVariant(
@@ -228,7 +229,7 @@ export async function POST(req: Request) {
           }
         }
         `,
-        { calculatedOrderId, variantId: variant.id, quantity: item.quantity || 1 }
+        { calculatedOrderId, variantId: variant.id, quantity: savedQty ?? item.quantity ?? 1 }
       );
 
       console.log("Added variant response:", JSON.stringify(addRes, null, 2));
