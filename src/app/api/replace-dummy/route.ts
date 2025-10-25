@@ -23,6 +23,7 @@ export async function POST(req: Request) {
 
     // 🧩 1. Pre-resolve all Marble Falls SKUs that should be modified
     const resolvedSkuList: string[] = [];
+    const tagSkuList: string[] = []; // keep original tag form (e.g. PS310G-22-SIZE)
 
     for (const item of lineItems) {
       const parts = item.sku.split(",");
@@ -36,16 +37,19 @@ export async function POST(req: Request) {
       const tagCandidate = tags.find((t: string) => t.includes("SIZE"));
       if (!tagCandidate) continue;
 
+      tagSkuList.push(tagCandidate); // <-- keep raw tag pattern
+
       const youthSizes = ["YXS", "YS", "YM", "YL", "YXL"];
       if (size && youthSizes.includes(size.toUpperCase())) {
-        size = size.substring(1); // remove 'Y'
+        size = size.substring(1);
       }
 
       const resolvedSku = tagCandidate.replace(/SIZE/g, size);
       resolvedSkuList.push(resolvedSku);
     }
 
-    console.log("Resolved Marble Falls SKUs:", resolvedSkuList);
+    console.log("Resolved SKUs:", resolvedSkuList);
+    console.log("Tag-based SKUs:", tagSkuList);
 
     // 🧩 2. Begin edit and fetch order line items
     const beginRes = await shopifyFetch(
@@ -86,11 +90,11 @@ export async function POST(req: Request) {
       const variantId = cli.variant?.id;
       const sku = cli.variant?.sku;
       let matchFound = false;
-
+    
       if (cli.quantity <= 0) continue;
-
+    
       if (sku) {
-        // Case 1: Variant has a SKU → direct match
+        // Case 1: Variant has a SKU → match with resolved SKUs
         if (resolvedSkuList.includes(sku)) {
           matchFound = true;
           console.log(`Matched by SKU: ${sku}`);
@@ -112,21 +116,18 @@ export async function POST(req: Request) {
           `,
           { variantId }
         );
-        console.log("Get Product ID from variant", variantRes)
+    
         const tags = variantRes.data?.productVariant?.product?.tags || [];
-        if (tags.some((tag: string) => resolvedSkuList.includes(tag))) {
+        if (tags.some((tag: string) => tagSkuList.includes(tag))) {
           matchFound = true;
-          console.log(
-            `Matched by product tags for variant ${variantId}:`,
-            tags
-          );
+          console.log(`Matched by product tag for variant ${variantId}:`, tags);
         }
       }
-
+    
       // 🧹 Set quantity to 0 only for matched Marble Falls items
       if (matchFound) {
         console.log(`Setting quantity 0 for Marble Falls item...`);
-
+    
         const removeRes = await shopifyFetch(
           `
           mutation orderEditSetQuantity(
@@ -146,7 +147,7 @@ export async function POST(req: Request) {
           `,
           { calculatedOrderId, lineItemId: cli.id, quantity: 0 }
         );
-
+    
         console.log("Removed CLI:", cli.id, JSON.stringify(removeRes, null, 2));
       }
     }
