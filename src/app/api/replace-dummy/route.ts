@@ -129,9 +129,39 @@ export async function POST(req: Request) {
       // 🧹 Set quantity to 0 only for matched Marble Falls items
       if (matchFound) {
         console.log(`Setting quantity 0 for Marble Falls item...`);
-        previousQuantities[sku] = cli.quantity;
-        console.log("previous Quantity", previousQuantities[sku])
-        console.log("quantity SKU", sku)
+      
+        // Determine which key to use — sku or resolvedSku (from tag match)
+        let keyForQuantity = sku;
+      
+        if (!sku) {
+          // Find the matching tag and map it to resolvedSku
+          const variantRes = await shopifyFetch(
+            `
+            query getProductTagsFromVariant($variantId: ID!) {
+              productVariant(id: $variantId) {
+                id
+                product { tags }
+              }
+            }
+            `,
+            { variantId }
+          );
+          const tags = variantRes.data?.productVariant?.product?.tags || [];
+          const matchedTag = tags.find((tag: string) => tagSkuList.includes(tag));
+          if (matchedTag) {
+            const index = tagSkuList.indexOf(matchedTag);
+            if (index !== -1) keyForQuantity = resolvedSkuList[index];
+          }
+        }
+      
+        // Store quantity using whichever key is valid
+        if (keyForQuantity) {
+          previousQuantities[keyForQuantity] = cli.quantity;
+        }
+      
+        console.log("Stored quantity for:", keyForQuantity, "=", cli.quantity);
+      
+        // Proceed with setting quantity to 0
         const removeRes = await shopifyFetch(
           `
           mutation orderEditSetQuantity(
@@ -151,9 +181,9 @@ export async function POST(req: Request) {
           `,
           { calculatedOrderId, lineItemId: cli.id, quantity: 0 }
         );
-    
+      
         console.log("Removed CLI:", cli.id, JSON.stringify(removeRes, null, 2));
-      }
+      }      
     }
 
     // 🧩 4. Add the resolved Marble Falls variants (same logic as before)
@@ -200,7 +230,7 @@ export async function POST(req: Request) {
         console.error("No variant found for", resolvedSku);
         continue;
       }
-      const savedQty = previousQuantities[variant.sku];
+      const savedQty = previousQuantities[variant.sku] ?? previousQuantities[resolvedSku];
       console.log(variant)
       console.log("saved Qty", savedQty);
       console.log("variant SKU", variant.sku)
