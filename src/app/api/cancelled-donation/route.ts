@@ -16,7 +16,7 @@ export async function POST(req: Request) {
       quantity?: number | string;
     };
 
-    // ✅ Filter ProSwag vendor items & calculate subtotal
+    // Filter ProSwag vendor items & calculate subtotal
     const proSwagTotal = lineItems.reduce((sum: number, li: LineItem) => {
       if (li.vendor === "ProSwag") {
         const price = parseFloat(li.price ?? "0");
@@ -30,10 +30,10 @@ export async function POST(req: Request) {
 
     console.log("Donation amount to subtract:", donationAmount);
 
-    // ✅ Convert GID → numeric order ID
+    // Convert GID → numeric order ID
     //const numericOrderId = orderId.split("/").pop();
 
-    // ✅ Get metafield custom.total_donations
+    // Get metafield custom.total_donations
     const metafieldRes = await fetch(
       `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/pages/154228228390/metafields.json`,
       {
@@ -49,12 +49,11 @@ export async function POST(req: Request) {
     console.log(donationField)
     const currentDonation = donationField ? parseFloat(JSON.parse(donationField.value).amount) : 0;
     console.log(currentDonation)
-    const updatedDonation = Math.max(currentDonation - donationAmount, 0); // ✅ prevent negative values
+    const updatedDonation = Math.max(currentDonation - donationAmount, 0); // prevent negative values
 
     console.log("Updated donation total:", updatedDonation);
 
-    // ✅ Update metafield
-    await fetch(
+    const response = await fetch(
       `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/metafields/${donationField.id}.json`,
       {
         method: "PUT",
@@ -65,12 +64,18 @@ export async function POST(req: Request) {
         body: JSON.stringify({
           metafield: {
             id: donationField.id,
-            value: updatedDonation.toFixed(2),
+            owner_id: donationField.owner_id,
+            owner_resource: "page",
             type: "money",
+            value: updatedDonation.toFixed(2)
           },
         }),
       }
     );
+
+    const result = await response.json();
+    console.log("Metafield Update Result:", result);
+
 
     return NextResponse.json({
       success: true,
