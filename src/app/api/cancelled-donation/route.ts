@@ -47,7 +47,7 @@ export async function POST(req: Request) {
     const { metafields } = await metafieldRes.json();
     const donationField = metafields.find((m: any) => m.key === "total_donations" && m.namespace === "custom");
     console.log(donationField)
-    const currentDonation = donationField ? parseFloat(donationField.value) : 0;
+    const currentDonation = donationField ? parseFloat(JSON.parse(donationField.value).amount) : 0;
     console.log(currentDonation)
     const updatedDonation = Math.max(currentDonation - donationAmount, 0); // ✅ prevent negative values
 
