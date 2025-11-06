@@ -53,6 +53,11 @@ export async function POST(req: Request) {
 
     console.log("Updated donation total:", updatedDonation);
 
+    const updatedValue = JSON.stringify({
+      amount: updatedDonation.toFixed(2),
+      currency_code: "USD",
+    });
+    
     const response = await fetch(
       `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/metafields/${donationField.id}.json`,
       {
@@ -67,15 +72,14 @@ export async function POST(req: Request) {
             owner_id: donationField.owner_id,
             owner_resource: "page",
             type: "money",
-            value: updatedDonation.toFixed(2)
+            value: updatedValue,
           },
         }),
       }
     );
-
+    
     const result = await response.json();
     console.log("Metafield Update Result:", result);
-
 
     return NextResponse.json({
       success: true,
