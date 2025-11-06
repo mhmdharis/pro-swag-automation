@@ -54,11 +54,11 @@ export async function POST(req: Request) {
 
     // ✅ Update metafield
     await fetch(
-      `https://${process.env.SHOPIFY_STORE_URL}/admin/api/2024-07/metafields/${donationField.id}.json`,
+      `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/metafields/${donationField.id}.json`,
       {
         method: "PUT",
         headers: {
-          "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_API_KEY!,
+          "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_API_TOKEN!,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
