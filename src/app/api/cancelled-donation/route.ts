@@ -14,11 +14,12 @@ export async function POST(req: Request) {
       vendor?: string;
       price?: string;
       quantity?: number | string;
+      sku: string
     };
 
     // Filter ProSwag vendor items & calculate subtotal
     const proSwagTotal = lineItems.reduce((sum: number, li: LineItem) => {
-      if (li.vendor === "ProSwag") {
+      if (li.vendor === "ProSwag" && li.sku && li.sku.trim() !== "") {
         const price = parseFloat(li.price ?? "0");
         const qty = Number(li.quantity ?? 1);
         sum += price * qty;
