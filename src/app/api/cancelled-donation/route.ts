@@ -35,7 +35,7 @@ export async function POST(req: Request) {
 
     // ✅ Get metafield custom.total_donations
     const metafieldRes = await fetch(
-      `${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${numericOrderId}/metafields.json`,
+      `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${numericOrderId}/metafields.json`,
       {
         headers: {
           "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_API_TOKEN!,
