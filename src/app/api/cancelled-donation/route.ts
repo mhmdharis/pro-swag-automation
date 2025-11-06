@@ -31,11 +31,11 @@ export async function POST(req: Request) {
     console.log("Donation amount to subtract:", donationAmount);
 
     // ✅ Convert GID → numeric order ID
-    const numericOrderId = orderId.split("/").pop();
+    //const numericOrderId = orderId.split("/").pop();
 
     // ✅ Get metafield custom.total_donations
     const metafieldRes = await fetch(
-      `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/orders/${numericOrderId}/metafields.json`,
+      `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/pages/154228228390/metafields.json`,
       {
         headers: {
           "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_API_TOKEN!,
@@ -54,7 +54,7 @@ export async function POST(req: Request) {
 
     // ✅ Update metafield
     await fetch(
-      `${process.env.SHOPIFY_STORE_URL}/admin/api/2024-07/metafields/${donationField.id}.json`,
+      `https://${process.env.SHOPIFY_STORE_URL}/admin/api/2024-07/metafields/${donationField.id}.json`,
       {
         method: "PUT",
         headers: {
