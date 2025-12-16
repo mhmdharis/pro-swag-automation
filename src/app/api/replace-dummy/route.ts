@@ -5,7 +5,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { orderId, lineItems } = body;
-
+    console.log(lineItems)
     const shopifyFetch = async (query: string, variables: any) => {
       const res = await fetch(
         `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-01/graphql.json`,
