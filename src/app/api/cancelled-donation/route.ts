@@ -12,7 +12,7 @@ type GraphqlResponse<T> = {
 type DonationLineItem = {
   title: string;
   sku: string | null;
-  priceAfterAllDiscountsBeforeTaxesSet: {
+  originalTotalSet: {
     shopMoney: {
       amount: string;
       currencyCode: string;
@@ -131,7 +131,7 @@ export async function POST(req: Request) {
               nodes {
                 title
                 sku
-                priceAfterAllDiscountsBeforeTaxesSet {
+                originalTotalSet {
                   shopMoney {
                     amount
                     currencyCode
@@ -182,7 +182,7 @@ export async function POST(req: Request) {
     const currencies = new Set(
       eligibleItems.map(
         (lineItem) =>
-          lineItem.priceAfterAllDiscountsBeforeTaxesSet.shopMoney.currencyCode
+          lineItem.originalTotalSet.shopMoney.currencyCode
       )
     );
 
@@ -195,7 +195,7 @@ export async function POST(req: Request) {
       (total, lineItem) =>
         total +
         moneyToCents(
-          lineItem.priceAfterAllDiscountsBeforeTaxesSet.shopMoney.amount
+          lineItem.originalTotalSet.shopMoney.amount
         ),
       0
     );
@@ -308,7 +308,7 @@ export async function POST(req: Request) {
         title: lineItem.title,
         sku: lineItem.sku,
         subtotal:
-          lineItem.priceAfterAllDiscountsBeforeTaxesSet.shopMoney.amount,
+          lineItem.originalTotalSet.shopMoney.amount,
       })),
     });
   } catch (error) {
