@@ -1,132 +1,301 @@
 import { NextResponse } from "next/server";
 
-// Helper for making Shopify GraphQL calls
-async function shopifyFetch(query: string, variables: any = {}) {
-  const res = await fetch(
-    `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2025-01/graphql.json`,
+const SHOPIFY_API_VERSION = "2026-07";
+const MARBLE_FALLS_COLLECTION_TITLE =
+  "Marble Falls Mustangs Athletics Apparel & Fan Gear";
+
+type GraphqlError = {
+  message?: string;
+};
+
+type GraphqlResponse<T> = {
+  data?: T;
+  errors?: GraphqlError[];
+};
+
+type Money = {
+  amount: string;
+  currencyCode: string;
+};
+
+type DonationLineItem = {
+  id: string;
+  title: string;
+  sku: string | null;
+  priceAfterAllDiscountsBeforeTaxesSet: {
+    shopMoney: Money;
+  };
+  product: {
+    collections: {
+      nodes: Array<{ title: string }>;
+    };
+  } | null;
+};
+
+async function shopifyFetch<T>(query: string, variables: Record<string, unknown> = {}) {
+  const storeDomain = process.env.SHOPIFY_STORE_DOMAIN;
+  const accessToken = process.env.SHOPIFY_ADMIN_API_TOKEN;
+
+  if (!storeDomain || !accessToken) {
+    throw new Error("Shopify configuration is missing");
+  }
+
+  const response = await fetch(
+    `https://${storeDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_API_TOKEN!,
+        "X-Shopify-Access-Token": accessToken,
       },
       body: JSON.stringify({ query, variables }),
     }
   );
-  const data = await res.json();
-  return data;
+
+  const result = (await response.json()) as GraphqlResponse<T>;
+
+  if (!response.ok) {
+    throw new Error(`Shopify request failed with status ${response.status}`);
+  }
+
+  if (result.errors?.length) {
+    throw new Error(
+      `Shopify GraphQL error: ${result.errors
+        .map((error) => error.message ?? "Unknown error")
+        .join("; ")}`
+    );
+  }
+
+  return result.data;
+}
+
+function normalizeOrderId(value: unknown) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return null;
+  }
+
+  const orderId = value.trim();
+  return orderId.startsWith("gid://shopify/Order/")
+    ? orderId
+    : /^\d+$/.test(orderId)
+      ? `gid://shopify/Order/${orderId}`
+      : null;
+}
+
+function moneyToCents(amount: string) {
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount < 0) {
+    throw new Error(`Invalid Shopify money amount: ${amount}`);
+  }
+
+  return Math.round(numericAmount * 100);
+}
+
+function readMoneyMetafield(value: string | undefined) {
+  if (!value) return 0;
+
+  try {
+    const parsed = JSON.parse(value) as { amount?: unknown };
+    const amount = Number(parsed.amount);
+    return Number.isFinite(amount) ? amount : 0;
+  } catch {
+    const amount = Number(value);
+    return Number.isFinite(amount) ? amount : 0;
+  }
 }
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    console.log("Received update-donation body:", JSON.stringify(body, null, 2));
+    const body = (await req.json()) as { orderId?: unknown };
+    const orderId = normalizeOrderId(body.orderId);
 
-    const orderTotal = parseFloat(body.orderTotal);
-    if (isNaN(orderTotal)) {
-      return NextResponse.json({ error: "Invalid orderTotal" }, { status: 400 });
+    if (!orderId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "A valid Shopify orderId is required",
+        },
+        { status: 400 }
+      );
     }
 
-    const donationAmount = orderTotal * 0.25;
-    console.log("Order total:", orderTotal, "→ Donation (25%):", donationAmount);
-
-    // 1️ Find Marble Falls page
-    const pageRes = await shopifyFetch(`
+    const orderData = await shopifyFetch<{
+      order: {
+        id: string;
+        name: string;
+        lineItems: { nodes: DonationLineItem[] };
+      } | null;
+    }>(
+      `
+        query getDonationOrder($id: ID!, $collectionQuery: String!) {
+          order(id: $id) {
+            id
+            name
+            lineItems(first: 250) {
+              nodes {
+                id
+                title
+                sku
+                priceAfterAllDiscountsBeforeTaxesSet {
+                  shopMoney {
+                    amount
+                    currencyCode
+                  }
+                }
+                product {
+                  collections(first: 1, query: $collectionQuery) {
+                    nodes {
+                      title
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `,
       {
+        id: orderId,
+        collectionQuery: `title:\"${MARBLE_FALLS_COLLECTION_TITLE}\"`,
+      }
+    );
+
+    if (!orderData?.order) {
+      return NextResponse.json(
+        { success: false, error: "Shopify order not found" },
+        { status: 404 }
+      );
+    }
+
+    const targetCollectionTitle = MARBLE_FALLS_COLLECTION_TITLE.toLowerCase();
+    const eligibleItems = orderData.order.lineItems.nodes.filter((lineItem) =>
+      lineItem.product?.collections.nodes.some(
+        (collection) => collection.title.toLowerCase() === targetCollectionTitle
+      )
+    );
+
+    if (eligibleItems.length === 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Order has no products in ${MARBLE_FALLS_COLLECTION_TITLE}`,
+        },
+        { status: 400 }
+      );
+    }
+
+    const currencies = new Set(
+      eligibleItems.map(
+        (lineItem) =>
+          lineItem.priceAfterAllDiscountsBeforeTaxesSet.shopMoney.currencyCode
+      )
+    );
+
+    if (currencies.size !== 1) {
+      throw new Error("Eligible line items use inconsistent currencies");
+    }
+
+    const currencyCode = [...currencies][0];
+    const eligibleSubtotalCents = eligibleItems.reduce(
+      (total, lineItem) =>
+        total +
+        moneyToCents(
+          lineItem.priceAfterAllDiscountsBeforeTaxesSet.shopMoney.amount
+        ),
+      0
+    );
+    const donationCents = Math.round(eligibleSubtotalCents * 0.25);
+
+    const pageData = await shopifyFetch<{
+      pages: {
+        nodes: Array<{ id: string; title: string }>;
+      };
+    }>(`
+      query getMarbleFallsPage {
         pages(first: 100) {
-          edges {
-            node { id title }
+          nodes {
+            id
+            title
           }
         }
       }
     `);
 
-    const marblePage = pageRes.data?.pages?.edges.find(
-      (edge: any) =>
-        edge.node.title.toLowerCase().includes("marble") &&
-        edge.node.title.toLowerCase().includes("falls")
-    );
+    const marblePage = pageData?.pages.nodes.find((page) => {
+      const title = page.title.toLowerCase();
+      return title.includes("marble") && title.includes("falls");
+    });
 
     if (!marblePage) {
-      console.error("Marble Falls page not found");
-      return NextResponse.json({ error: "Marble Falls page not found" }, { status: 404 });
+      return NextResponse.json(
+        { success: false, error: "Marble Falls page not found" },
+        { status: 404 }
+      );
     }
 
-    const pageId = marblePage.node.id;
-    console.log("Found Marble Falls page:", marblePage.node.title, pageId);
-
-    // 2️ Fetch current metafield value
-    const metafieldRes = await shopifyFetch(
+    const metafieldData = await shopifyFetch<{
+      page: {
+        metafields: {
+          nodes: Array<{ key: string; value: string }>;
+        };
+      } | null;
+    }>(
       `
-      query getPageMetafields($id: ID!) {
-        page(id: $id) {
-          metafields(first: 10, namespace: "custom") {
-            edges {
-              node {
-                id
+        query getPageMetafields($id: ID!) {
+          page(id: $id) {
+            metafields(first: 10, namespace: "custom") {
+              nodes {
                 key
                 value
               }
             }
           }
         }
-      }
       `,
-      { id: pageId }
+      { id: marblePage.id }
     );
 
-    const metafields = metafieldRes.data?.page?.metafields?.edges || [];
-    const existingField = metafields.find(
-      (edge: any) => edge.node.key === "total_donations"
+    const existingField = metafieldData?.page?.metafields.nodes.find(
+      (metafield) => metafield.key === "total_donations"
     );
+    const existingTotalCents = Math.round(
+      readMoneyMetafield(existingField?.value) * 100
+    );
+    const newTotalCents = existingTotalCents + donationCents;
 
-    const rawValue = existingField?.node?.value ?? "0";
-    const numericValue = parseFloat(rawValue.replace(/[^0-9.-]/g, ""));
-    const existingValue = isNaN(numericValue) ? 0 : numericValue;
-
-    const newTotal = existingValue + donationAmount;
-    console.log(`Existing total: ${existingValue} → New total: ${newTotal}`);
-
-    // 3️ Update metafield (type must match existing: "money")
-    const saveRes = await shopifyFetch(
-        `
-        mutation setMetafields($metafields: [MetafieldsSetInput!]!) {
-        metafieldsSet(metafields: $metafields) {
-            metafields {
-            id
-            key
-            namespace
-            value
-            type
-            }
+    const mutationData = await shopifyFetch<{
+      metafieldsSet: {
+        userErrors: Array<{ field: string[] | null; message: string }>;
+      };
+    }>(
+      `
+        mutation setDonationMetafield($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) {
             userErrors {
-            field
-            message
+              field
+              message
             }
+          }
         }
-        }
-        `,
-        {
+      `,
+      {
         metafields: [
-            {
+          {
             namespace: "custom",
             key: "total_donations",
             type: "money",
             value: JSON.stringify({
-                amount: parseFloat(newTotal.toFixed(2)),
-                currency_code: "USD", // change if your store uses another currency
+              amount: (newTotalCents / 100).toFixed(2),
+              currency_code: currencyCode,
             }),
-            ownerId: pageId,
-            },
+            ownerId: marblePage.id,
+          },
         ],
-        }
-    );  
+      }
+    );
 
-    console.log("Metafield update response:", JSON.stringify(saveRes, null, 2));
-
-    const userErrors = saveRes.data?.metafieldsSet?.userErrors || [];
+    const userErrors = mutationData?.metafieldsSet.userErrors ?? [];
     if (userErrors.length > 0) {
-      console.error("Shopify user errors:", userErrors);
       return NextResponse.json(
         { success: false, errors: userErrors },
         { status: 400 }
@@ -136,12 +305,25 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       message: "Donation updated successfully",
-      newTotal,
+      orderId: orderData.order.id,
+      orderName: orderData.order.name,
+      eligibleSubtotal: (eligibleSubtotalCents / 100).toFixed(2),
+      donationAmount: (donationCents / 100).toFixed(2),
+      newTotal: (newTotalCents / 100).toFixed(2),
+      matchedItems: eligibleItems.map((lineItem) => ({
+        title: lineItem.title,
+        sku: lineItem.sku,
+        subtotal:
+          lineItem.priceAfterAllDiscountsBeforeTaxesSet.shopMoney.amount,
+      })),
     });
-  } catch (err) {
-    console.error("Error in /api/update-donation:", err);
+  } catch (error) {
+    console.error("Error in /api/update-donation:", error);
     return NextResponse.json(
-      { success: false, error: (err as Error).message },
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Processing failed",
+      },
       { status: 500 }
     );
   }
