@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { handlePosDonation } from "@/lib/pos-donation";
 
 const SHOPIFY_API_VERSION = "2026-07";
 const MARBLE_FALLS_COLLECTION_TITLE =
@@ -119,6 +120,9 @@ export async function POST(req: Request) {
       );
     }
 
+    const posResponse = await handlePosDonation(orderId, "credit");
+    if (posResponse) return posResponse;
+
     const orderData = await shopifyFetch<{
       order: {
         id: string;
@@ -236,7 +240,7 @@ export async function POST(req: Request) {
     const metafieldData = await shopifyFetch<{
       page: {
         metafields: {
-          nodes: Array<{ key: string; value: string }>;
+          nodes: Array<{ key: string; value: string; compareDigest: string }>;
         };
       } | null;
     }>(
@@ -247,6 +251,7 @@ export async function POST(req: Request) {
               nodes {
                 key
                 value
+                compareDigest
               }
             }
           }
@@ -265,7 +270,7 @@ export async function POST(req: Request) {
 
     const mutationData = await shopifyFetch<{
       metafieldsSet: {
-        userErrors: Array<{ field: string[] | null; message: string }>;
+        userErrors: Array<{ field: string[] | null; message: string; code: string }>;
       };
     }>(
       `
@@ -274,6 +279,7 @@ export async function POST(req: Request) {
             userErrors {
               field
               message
+              code
             }
           }
         }
@@ -284,6 +290,7 @@ export async function POST(req: Request) {
             namespace: "custom",
             key: "total_donations",
             type: "money",
+            compareDigest: existingField?.compareDigest ?? null,
             value: JSON.stringify({
               amount: (newTotalCents / 100).toFixed(2),
               currency_code: currencyCode,
@@ -298,7 +305,7 @@ export async function POST(req: Request) {
     if (userErrors.length > 0) {
       return NextResponse.json(
         { success: false, errors: userErrors },
-        { status: 400 }
+        { status: userErrors.some((error) => error.code === "INVALID_COMPARE_DIGEST") ? 409 : 400 }
       );
     }
 

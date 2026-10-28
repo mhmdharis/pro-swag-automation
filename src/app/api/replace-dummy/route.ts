@@ -21,6 +21,19 @@ export async function POST(req: Request) {
       return res.json();
     };
 
+    // A POS event sale already contains the scanned inventory variants.
+    // Never edit those variants, even if a product happens to have a SIZE tag.
+    const sourceResult = await shopifyFetch(
+      `query replacementOrderSource($id: ID!) { order(id: $id) { sourceName } }`,
+      { id: orderId }
+    );
+    if (sourceResult.errors?.length || !sourceResult.data?.order) {
+      throw new Error("Unable to verify order source before replacement");
+    }
+    if (sourceResult.data.order.sourceName === "pos") {
+      return NextResponse.json({ success: true, skipped: true, reason: "POS products do not need replacement" });
+    }
+
     // 🧩 1. Pre-resolve all Marble Falls SKUs that should be modified
     const resolvedSkuList: string[] = [];
     const tagSkuList: string[] = []; // keep original tag form (e.g. PS310G-22-SIZE)
@@ -50,6 +63,12 @@ export async function POST(req: Request) {
 
     console.log("Resolved SKUs:", resolvedSkuList);
     console.log("Tag-based SKUs:", tagSkuList);
+
+    // POS event orders contain actual products and no SIZE mapping tags.
+    // Do not open/commit an unnecessary Shopify order edit for those orders.
+    if (resolvedSkuList.length === 0) {
+      return NextResponse.json({ success: true, skipped: true, reason: "No dummy products to replace" });
+    }
 
     // 🧩 2. Begin edit and fetch order line items
     const beginRes = await shopifyFetch(
